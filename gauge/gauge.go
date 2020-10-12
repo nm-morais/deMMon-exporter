@@ -37,12 +37,10 @@ func (g *Gauge) Set(fields []*lineProto.Field) {
 func (g *Gauge) Get() []*lineProto.Field {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-
 	fieldsCopy := make([]*lineProto.Field, 0, len(g.fields))
 	for _, f := range g.fields {
 		fCopy := *f
 		fieldsCopy = append(fieldsCopy, &fCopy)
 	}
-
 	return fieldsCopy
 }

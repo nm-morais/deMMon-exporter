@@ -1,151 +1,262 @@
 package exporter
 
 import (
+	"context"
+	"fmt"
 	"time"
 
-	babel "github.com/nm-morais/go-babel/pkg"
-	"github.com/nm-morais/go-babel/pkg/errors"
-	"github.com/nm-morais/go-babel/pkg/logs"
-	"github.com/nm-morais/go-babel/pkg/message"
-	"github.com/nm-morais/go-babel/pkg/notification"
+	influxdb "github.com/influxdata/influxdb1-client/v2"
+	lv "github.com/nm-morais/demmon-metrics-client/types/metrics/internal"
+	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	stream "github.com/nm-morais/go-babel/pkg/stream"
-	"github.com/nm-morais/go-babel/pkg/timer"
-	"github.com/sirupsen/logrus"
 
-	lineProto "github.com/influxdata/line-protocol"
-
-	"github.com/nm-morais/demmon-metrics-client/gauge"
-	"github.com/nm-morais/demmon-metrics-client/types"
-)
-
-const (
-	exporterProtoID = 100
-	importerProtoID = 101
-	name            = "exporter"
+	"github.com/nm-morais/demmon-metrics-client/types/metrics"
+	"github.com/nm-morais/demmon-metrics-client/types/metrics/generic"
+	prototypes "github.com/nm-morais/demmon-metrics-client/types/protocol"
 )
 
 type ExporterConf struct {
-	RedialTimeout time.Duration
+	importerAddr  peer.Peer
 	MaxRedials    int
-
-	target peer.Peer
-
-	DatabaseName           string
-	Username               string
-	Password               string
-	MaxBatchSize           uint64
-	BatchEmissionFrequency time.Duration
+	RedialTimeout time.Duration
+	bpConf        influxdb.BatchPointsConfig
 }
 
 type Exporter struct {
-	confs  ExporterConf
-	logger *logrus.Logger
-
-	failedDials int
-
-	gauges []*gauge.Gauge
-
-	currBatch []lineProto.Metric
-	idx       int
+	proto      protocol.Protocol
+	counters   *lv.Space
+	gauges     *lv.Space
+	histograms *lv.Space
+	tags       map[string]string
+	confs      ExporterConf
 }
 
-func New(confs ExporterConf) *Exporter {
+func New(confs ExporterConf, tags map[string]string) *Exporter {
 	return &Exporter{
-		confs:       confs,
-		logger:      logs.NewLogger(name),
-		currBatch:   make([]lineProto.Metric, confs.MaxBatchSize),
-		gauges:      []*gauge.Gauge{},
-		failedDials: 0,
-		idx:         0,
+		proto:      prototypes.NewExporterProto(prototypes.ExporterProtoConf{MaxRedials: confs.MaxRedials, RedialTimeout: confs.RedialTimeout, ImporterAddr: confs.importerAddr}),
+		confs:      confs,
+		counters:   lv.NewSpace(),
+		gauges:     lv.NewSpace(),
+		histograms: lv.NewSpace(),
+		tags:       tags,
 	}
 }
 
-func (e *Exporter) MessageDelivered(message message.Message, peer peer.Peer) {}
-
-func (e *Exporter) MessageDeliveryErr(message message.Message, peer peer.Peer, error errors.Error) {
-}
-
-func (e *Exporter) handleFlushTimer(timer timer.Timer) {
-	metricMessage := NewMetricMessage(e.currBatch[:e.idx])
-	babel.SendMessage(metricMessage, e.confs.target, importerProtoID, []protocol.ID{exporterProtoID})
-	for i := 0; i < e.idx; i++ {
-		e.currBatch[i] = nil
+// NewCounter returns an Influx counter.
+func (e *Exporter) NewCounter(name string) *InfluxCounter {
+	return &InfluxCounter{
+		name: name,
+		obs:  e.counters.Observe,
 	}
-	e.idx = 0
 }
 
-func (e *Exporter) handleRedialTimer(timer timer.Timer) {
-	babel.Dial(e.confs.target, e.ID(), stream.NewTCPDialer())
-}
-
-func (e *Exporter) handleMetricNotification(notification notification.Notification) {
-	metricNotification := notification.(metricNotification)
-	if !metricNotification.Batch {
-		metricMessage := NewMetricMessage([]lineProto.Metric{metricNotification.Metric})
-		babel.SendMessage(metricMessage, e.confs.target, importerProtoID, []protocol.ID{exporterProtoID})
-		return
+// NewGauge returns an Influx gauge.
+func (e *Exporter) NewGauge(name string) *InfluxGauge {
+	return &InfluxGauge{
+		name: name,
+		obs:  e.gauges.Observe,
+		add:  e.gauges.Add,
 	}
-	e.currBatch = append(e.currBatch, metricNotification.Metric)
-	e.idx++
 }
 
-func (e *Exporter) ID() protocol.ID {
-	return exporterProtoID
-}
-
-func (e *Exporter) Name() string {
-	return name
-}
-
-func (e *Exporter) Logger() *logrus.Logger {
-	return e.logger
-}
-
-func (e *Exporter) Init() {
-	babel.RegisterNotificationHandler(e.ID(), metricNotification{}, e.handleMetricNotification)
-	babel.RegisterTimerHandler(e.ID(), redialTimerID, e.handleRedialTimer)
-	babel.RegisterTimerHandler(e.ID(), flushTimerID, e.handleFlushTimer)
-}
-
-func (e *Exporter) Start() {
-	for _, g := range e.gauges {
-		go e.handleGauge(g)
+// NewHistogram returns an Influx histogram.
+func (e *Exporter) NewHistogram(name string) *InfluxHist {
+	return &InfluxHist{
+		name: name,
+		obs:  e.histograms.Observe,
 	}
-	babel.Dial(e.confs.target, e.ID(), stream.NewTCPDialer())
 }
 
-func (e *Exporter) DialFailed(p peer.Peer) {
-	e.failedDials++
-
-	if e.failedDials > e.confs.MaxRedials {
-		e.logger.Panicln("Could not dial importer")
-	}
-
-	babel.RegisterTimer(e.ID(), NewRedialTimer(e.confs.RedialTimeout))
-}
-
-func (e *Exporter) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
-	return sourceProto == e.ID()
-}
-
-func (e *Exporter) InConnRequested(peer peer.Peer) bool {
-	return false
-}
-
-func (e *Exporter) OutConnDown(peer peer.Peer) {
-	e.logger.Panic("local conn down")
-}
-
-func (e *Exporter) RegisterGauge(g *gauge.Gauge) {
-	e.gauges = append(e.gauges, g)
-}
-
-func (e *Exporter) handleGauge(g *gauge.Gauge) {
-	gaugeTicker := time.NewTicker(g.EmmissionFrequency)
+// WriteLoop is a helper method that invokes WriteTo to the passed writer every
+// time the passed channel fires. This method blocks until the channel is
+// closed, so clients probably want to run it in its own goroutine. For typical
+// usage, create a time.Ticker and pass its C channel to this method.
+func (e *Exporter) ExportLoop(ctx context.Context, c <-chan time.Time) {
 	for {
-		<-gaugeTicker.C
-		babel.SendNotification(NewMetricNotification(types.NewMetric(g.Name, g.Tags, g.Get(), time.Now()), g.Batch))
+		select {
+		case <-c:
+			if err := e.Export(); err != nil {
+				fmt.Println("Error writing: ", err)
+			}
+		case <-ctx.Done():
+			return
+		}
 	}
+}
+
+// WriteTo flushes the buffered content of the metrics to the writer, in an
+// Influx BatchPoints format. WriteTo abides best-effort semantics, so
+// observations are lost if there is a problem with the write. Clients should be
+// sure to call WriteTo regularly, ideally through the WriteLoop helper method.
+func (e *Exporter) Export() (err error) {
+	bp, err := influxdb.NewBatchPoints(e.confs.bpConf)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now()
+
+	e.counters.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+		tags := mergeTags(e.tags, lvs)
+		var p *influxdb.Point
+		fields := map[string]interface{}{"count": sum(values)}
+		p, err = influxdb.NewPoint(name, tags, fields, now)
+		if err != nil {
+			return false
+		}
+		bp.AddPoint(p)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+
+	e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+		tags := mergeTags(e.tags, lvs)
+		var p *influxdb.Point
+		fields := map[string]interface{}{"value": last(values)}
+		p, err = influxdb.NewPoint(name, tags, fields, now)
+		if err != nil {
+			return false
+		}
+		bp.AddPoint(p)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+
+	e.histograms.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+		histogram := generic.NewHistogram(name, 50)
+		tags := mergeTags(e.tags, lvs)
+		var p *influxdb.Point
+		for _, v := range values {
+			histogram.Observe(v)
+		}
+		fields := map[string]interface{}{
+			"p50": histogram.Quantile(0.50),
+			"p90": histogram.Quantile(0.90),
+			"p95": histogram.Quantile(0.95),
+			"p99": histogram.Quantile(0.99),
+		}
+
+		p, err = influxdb.NewPoint(name, tags, fields, now)
+
+		if err != nil {
+			return false
+		}
+		bp.AddPoint(p)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+
+	notifErr := pkg.SendNotification(prototypes.NewMetricNotification(bp))
+	if notifErr != nil {
+		return fmt.Errorf(notifErr.Reason())
+	}
+	return
+}
+
+func mergeTags(tags map[string]string, labelValues []string) map[string]string {
+	if len(labelValues)%2 != 0 {
+		panic("mergeTags received a labelValues with an odd number of strings")
+	}
+	ret := make(map[string]string, len(tags)+len(labelValues)/2)
+	for k, v := range tags {
+		ret[k] = v
+	}
+	for i := 0; i < len(labelValues); i += 2 {
+		ret[labelValues[i]] = labelValues[i+1]
+	}
+	return ret
+}
+
+func sum(a []float64) float64 {
+	var v float64
+	for _, f := range a {
+		v += f
+	}
+	return v
+}
+
+func last(a []float64) float64 {
+	return a[len(a)-1]
+}
+
+type observeFunc func(name string, lvs lv.LabelValues, value float64)
+
+// Counter is an Influx counter. Observations are forwarded to an Influx
+// object, and aggregated (summed) per timeseries.
+type InfluxCounter struct {
+	name string
+	lvs  lv.LabelValues
+	obs  observeFunc
+}
+
+// With implements metrics.Counter.
+func (c *InfluxCounter) With(labelValues ...string) metrics.Counter {
+	return &InfluxCounter{
+		name: c.name,
+		lvs:  c.lvs.With(labelValues...),
+		obs:  c.obs,
+	}
+}
+
+// Add implements metrics.Counter.
+func (c *InfluxCounter) Add(delta float64) {
+	c.obs(c.name, c.lvs, delta)
+}
+
+// Gauge is an Influx gauge. Observations are forwarded to a Dogstatsd
+// object, and aggregated (the last observation selected) per timeseries.
+type InfluxGauge struct {
+	name string
+	lvs  lv.LabelValues
+	obs  observeFunc
+	add  observeFunc
+}
+
+// With implements metrics.Gauge.
+func (g *InfluxGauge) With(labelValues ...string) metrics.Gauge {
+	return &InfluxGauge{
+		name: g.name,
+		lvs:  g.lvs.With(labelValues...),
+		obs:  g.obs,
+		add:  g.add,
+	}
+}
+
+// Set implements metrics.Gauge.
+func (g *InfluxGauge) Set(value float64) {
+	g.obs(g.name, g.lvs, value)
+}
+
+// Add implements metrics.Gauge.
+func (g *InfluxGauge) Add(delta float64) {
+	g.add(g.name, g.lvs, delta)
+}
+
+// InfluxHist is an Influx histrogram. Observations are aggregated into a
+// generic.InfluxHist and emitted as per-quantile gauges to the Influx server.
+type InfluxHist struct {
+	name string
+	lvs  lv.LabelValues
+	obs  observeFunc
+}
+
+// With implements metrics.Histogram.
+func (h *InfluxHist) With(labelValues ...string) metrics.Histogram {
+	return &InfluxHist{
+		name: h.name,
+		lvs:  h.lvs.With(labelValues...),
+		obs:  h.obs,
+	}
+}
+
+// Observe implements metrics.Histogram.
+func (h *InfluxHist) Observe(value float64) {
+	h.obs(h.name, h.lvs, value)
 }
