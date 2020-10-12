@@ -1,7 +1,7 @@
 package prototypes
 
 import (
-	influxdb "github.com/influxdata/influxdb1-client/v2"
+	influxdb "github.com/influxdata/influxdb/client/v2"
 	"github.com/nm-morais/go-babel/pkg/notification"
 )
 

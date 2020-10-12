@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
+	influxdb "github.com/influxdata/influxdb/client/v2"
 	models "github.com/influxdata/influxdb/models"
-	influxdb "github.com/influxdata/influxdb1-client/v2"
 	"github.com/nm-morais/go-babel/pkg/message"
 )
 
@@ -75,6 +75,7 @@ func (MetricMsgSerializer) Deserialize(msgBytes []byte) message.Message {
 	bufPos += 2
 
 	precision := string(msgBytes[bufPos : uint16(bufPos)+precisionBytesNr])
+
 	points, err := models.ParsePointsWithPrecision(msgBytes[bufPos:], time.Now().UTC(), precision)
 
 	if err != nil {
