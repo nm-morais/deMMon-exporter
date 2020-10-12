@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 
 	"github.com/VividCortex/gohistogram"
-	"github.com/nm-morais/demmon-metrics-client/types/metrics"
-	lv "github.com/nm-morais/demmon-metrics-client/types/metrics/internal"
+	"github.com/nm-morais/deMMon-exporter/types/metrics"
+	lv "github.com/nm-morais/deMMon-exporter/types/metrics/internal"
 )
 
 // Counter is an in-memory implementation of a Counter.

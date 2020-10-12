@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"time"
 
-	influxdb "github.com/influxdata/influxdb1-client/v2"
-	lv "github.com/nm-morais/demmon-metrics-client/types/metrics/internal"
+	influxdb "github.com/influxdata/influxdb/client/v2"
+
+	lv "github.com/nm-morais/deMMon-exporter/types/metrics/internal"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	"github.com/nm-morais/go-babel/pkg/protocol"
+	protocol "github.com/nm-morais/go-babel/pkg/protocol"
 
-	"github.com/nm-morais/demmon-metrics-client/types/metrics"
-	"github.com/nm-morais/demmon-metrics-client/types/metrics/generic"
-	prototypes "github.com/nm-morais/demmon-metrics-client/types/protocol"
+	"github.com/nm-morais/deMMon-exporter/types/metrics"
+	"github.com/nm-morais/deMMon-exporter/types/metrics/generic"
+	exporterProto "github.com/nm-morais/deMMon-exporter/types/protocol"
 )
 
 type ExporterConf struct {
@@ -34,7 +35,7 @@ type Exporter struct {
 
 func New(confs ExporterConf, tags map[string]string) *Exporter {
 	return &Exporter{
-		proto:      prototypes.NewExporterProto(prototypes.ExporterProtoConf{MaxRedials: confs.MaxRedials, RedialTimeout: confs.RedialTimeout, ImporterAddr: confs.importerAddr}),
+		proto:      exporterProto.NewExporterProto(exporterProto.ExporterProtoConf{MaxRedials: confs.MaxRedials, RedialTimeout: confs.RedialTimeout, ImporterAddr: confs.importerAddr}),
 		confs:      confs,
 		counters:   lv.NewSpace(),
 		gauges:     lv.NewSpace(),
@@ -44,7 +45,7 @@ func New(confs ExporterConf, tags map[string]string) *Exporter {
 }
 
 // Proto returns the babel proto of the exporter.
-func (e *Exporter) Proto() prototol.Protocol {
+func (e *Exporter) Proto() protocol.Protocol {
 	return e.proto
 }
 
@@ -158,7 +159,7 @@ func (e *Exporter) Export() (err error) {
 		return err
 	}
 
-	notifErr := pkg.SendNotification(prototypes.NewMetricNotification(bp))
+	notifErr := pkg.SendNotification(exporterProto.NewMetricNotification(bp))
 	if notifErr != nil {
 		return fmt.Errorf(notifErr.Reason())
 	}
