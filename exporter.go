@@ -43,6 +43,11 @@ func New(confs ExporterConf, tags map[string]string) *Exporter {
 	}
 }
 
+// Proto returns the babel proto of the exporter.
+func (e *Exporter) Proto() prototol.Protocol {
+	return e.proto
+}
+
 // NewCounter returns an Influx counter.
 func (e *Exporter) NewCounter(name string) *InfluxCounter {
 	return &InfluxCounter{
