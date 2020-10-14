@@ -1,4 +1,4 @@
-package prototypes
+package protocoltypes
 
 import (
 	"bytes"
@@ -75,7 +75,7 @@ func (MetricMsgSerializer) Deserialize(msgBytes []byte) message.Message {
 	bufPos += 2
 
 	precision := string(msgBytes[bufPos : uint16(bufPos)+precisionBytesNr])
-
+	bufPos += int(precisionBytesNr)
 	points, err := models.ParsePointsWithPrecision(msgBytes[bufPos:], time.Now().UTC(), precision)
 
 	if err != nil {

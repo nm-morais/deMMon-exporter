@@ -9,7 +9,7 @@ import (
 
 	"github.com/VividCortex/gohistogram"
 	"github.com/nm-morais/deMMon-exporter/types/metrics"
-	lv "github.com/nm-morais/deMMon-exporter/types/metrics/internal"
+	lv "github.com/nm-morais/deMMon-exporter/types/metrics/utils"
 )
 
 // Counter is an in-memory implementation of a Counter.
@@ -178,7 +178,7 @@ func (h *Histogram) LabelValues() []string {
 func (h *Histogram) Print(w io.Writer) {
 	h.h.RLock()
 	defer h.h.RUnlock()
-	fmt.Fprintf(w, h.h.String())
+	fmt.Fprint(w, h.h.String())
 }
 
 // safeHistogram exists as gohistogram.Histogram is not goroutine-safe.

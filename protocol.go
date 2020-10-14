@@ -1,8 +1,8 @@
-package prototypes
+package exporter
 
 import (
-	"time"
-
+	"github.com/nm-morais/deMMon-exporter/types/protocoltypes"
+	"github.com/nm-morais/go-babel/pkg"
 	babel "github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -10,7 +10,6 @@ import (
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-	"github.com/nm-morais/go-babel/pkg/stream"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/sirupsen/logrus"
 )
@@ -21,20 +20,16 @@ const (
 	name            = "exporter"
 )
 
-type ExporterProtoConf struct {
-	ImporterAddr  peer.Peer
-	MaxRedials    int
-	RedialTimeout time.Duration
-}
-
 type ExporterProto struct {
-	confs       ExporterProtoConf
+	exporter    *Exporter
+	confs       ExporterConf
 	logger      *logrus.Logger
 	failedDials int
 }
 
-func NewExporterProto(confs ExporterProtoConf) *ExporterProto {
+func NewExporterProto(confs ExporterConf, exporter *Exporter) *ExporterProto {
 	return &ExporterProto{
+		exporter:    exporter,
 		confs:       confs,
 		failedDials: 0,
 		logger:      logs.NewLogger(name),
@@ -47,13 +42,24 @@ func (e *ExporterProto) MessageDeliveryErr(message message.Message, peer peer.Pe
 }
 
 func (e *ExporterProto) handleRedialTimer(timer timer.Timer) {
-	babel.Dial(e.confs.ImporterAddr, e.ID(), stream.NewTCPDialer())
+	babel.Dial(e.ID(), e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr())
+}
+
+func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
+	pkg.RegisterTimer(e.ID(), protocoltypes.NewFlushTimer(e.confs.ExportFrequency))
+	e.logger.Info("Exporting metrics")
+	err := e.exporter.Export()
+	if err != nil {
+		e.logger.Error(err)
+		return
+	}
+	e.logger.Info("Exported metrics successfully")
 }
 
 func (e *ExporterProto) handleMetricNotification(n notification.Notification) {
-	metricNotification := n.(MetricNotification)
-	metricMessage := NewMetricMessage(metricNotification.Points)
-	babel.SendMessage(metricMessage, e.confs.ImporterAddr, importerProtoID, []protocol.ID{exporterProtoID})
+	metricNotification := n.(protocoltypes.MetricNotification)
+	metricMessage := protocoltypes.NewMetricMessage(metricNotification.Points)
+	babel.SendMessageSideStream(metricMessage, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, []protocol.ID{importerProtoID})
 }
 
 func (e *ExporterProto) ID() protocol.ID {
@@ -69,15 +75,18 @@ func (e *ExporterProto) Logger() *logrus.Logger {
 }
 
 func (e *ExporterProto) Init() {
-	babel.RegisterNotificationHandler(e.ID(), MetricNotification{}, e.handleMetricNotification)
-	babel.RegisterTimerHandler(e.ID(), NewRedialTimer(0).ID(), e.handleRedialTimer)
+	babel.RegisterNotificationHandler(e.ID(), protocoltypes.MetricNotification{}, e.handleMetricNotification)
+	babel.RegisterTimerHandler(e.ID(), protocoltypes.NewFlushTimer(0).ID(), e.handleFlushTimer)
+
+	// babel.RegisterTimerHandler(e.ID(), NewRedialTimer(0).ID(), e.handleRedialTimer)
 }
 
 func (e *ExporterProto) Start() {
 	// for _, g := range e.gauges {
 	// 	// go e.handleGauge(g)
 	// }
-	babel.Dial(e.confs.ImporterAddr, e.ID(), stream.NewUDPDialer())
+	// babel.Dial(e.confs.ImporterAddr, e.ID(), stream.NewUDPDialer())
+	pkg.RegisterTimer(e.ID(), protocoltypes.NewFlushTimer(0))
 }
 
 func (e *ExporterProto) DialFailed(p peer.Peer) {
@@ -87,7 +96,7 @@ func (e *ExporterProto) DialFailed(p peer.Peer) {
 		e.logger.Panicln("Could not dial importer")
 	}
 
-	babel.RegisterTimer(e.ID(), NewRedialTimer(e.confs.RedialTimeout))
+	babel.RegisterTimer(e.ID(), protocoltypes.NewRedialTimer(e.confs.RedialTimeout))
 }
 
 func (e *ExporterProto) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {

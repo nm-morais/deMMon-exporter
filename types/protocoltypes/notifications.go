@@ -1,4 +1,4 @@
-package prototypes
+package protocoltypes
 
 import (
 	influxdb "github.com/influxdata/influxdb/client/v2"

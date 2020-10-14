@@ -1,27 +1,28 @@
 package exporter
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	influxdb "github.com/influxdata/influxdb/client/v2"
 
-	lv "github.com/nm-morais/deMMon-exporter/types/metrics/internal"
+	"github.com/nm-morais/deMMon-exporter/types/protocoltypes"
+
+	lv "github.com/nm-morais/deMMon-exporter/types/metrics/utils"
 	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
-	protocol "github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/protocol"
 
 	"github.com/nm-morais/deMMon-exporter/types/metrics"
 	"github.com/nm-morais/deMMon-exporter/types/metrics/generic"
-	exporterProto "github.com/nm-morais/deMMon-exporter/types/protocol"
 )
 
 type ExporterConf struct {
-	importerAddr  peer.Peer
-	MaxRedials    int
-	RedialTimeout time.Duration
-	bpConf        influxdb.BatchPointsConfig
+	ImporterAddr    peer.Peer
+	MaxRedials      int
+	RedialTimeout   time.Duration
+	BpConf          influxdb.BatchPointsConfig
+	ExportFrequency time.Duration
 }
 
 type Exporter struct {
@@ -34,14 +35,15 @@ type Exporter struct {
 }
 
 func New(confs ExporterConf, tags map[string]string) *Exporter {
-	return &Exporter{
-		proto:      exporterProto.NewExporterProto(exporterProto.ExporterProtoConf{MaxRedials: confs.MaxRedials, RedialTimeout: confs.RedialTimeout, ImporterAddr: confs.importerAddr}),
+	e := &Exporter{
 		confs:      confs,
 		counters:   lv.NewSpace(),
 		gauges:     lv.NewSpace(),
 		histograms: lv.NewSpace(),
 		tags:       tags,
 	}
+	e.proto = NewExporterProto(confs, e)
+	return e
 }
 
 // Proto returns the babel proto of the exporter.
@@ -74,29 +76,12 @@ func (e *Exporter) NewHistogram(name string) *InfluxHist {
 	}
 }
 
-// WriteLoop is a helper method that invokes WriteTo to the passed writer every
-// time the passed channel fires. This method blocks until the channel is
-// closed, so clients probably want to run it in its own goroutine. For typical
-// usage, create a time.Ticker and pass its C channel to this method.
-func (e *Exporter) ExportLoop(ctx context.Context, c <-chan time.Time) {
-	for {
-		select {
-		case <-c:
-			if err := e.Export(); err != nil {
-				fmt.Println("Error writing: ", err)
-			}
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-// WriteTo flushes the buffered content of the metrics to the writer, in an
+// Export flushes the buffered content of the metrics to the writer, in an
 // Influx BatchPoints format. WriteTo abides best-effort semantics, so
-// observations are lost if there is a problem with the write. Clients should be
-// sure to call WriteTo regularly, ideally through the WriteLoop helper method.
+// observations are lost if there is a problem with the write. Clients should not
+// need to explicitely export metrics
 func (e *Exporter) Export() (err error) {
-	bp, err := influxdb.NewBatchPoints(e.confs.bpConf)
+	bp, err := influxdb.NewBatchPoints(e.confs.BpConf)
 	if err != nil {
 		return err
 	}
@@ -159,7 +144,7 @@ func (e *Exporter) Export() (err error) {
 		return err
 	}
 
-	notifErr := pkg.SendNotification(exporterProto.NewMetricNotification(bp))
+	notifErr := pkg.SendNotification(protocoltypes.NewMetricNotification(bp))
 	if notifErr != nil {
 		return fmt.Errorf(notifErr.Reason())
 	}

@@ -1,4 +1,4 @@
-package lv
+package metricUtils
 
 // LabelValues is a type alias that provides validation on its With method.
 // Metrics may include it as a member to help them satisfy With semantics and
