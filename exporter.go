@@ -1,27 +1,18 @@
 package exporter
 
 import (
-	"fmt"
 	"time"
 
-	influxdb "github.com/influxdata/influxdb/client/v2"
-
-	"github.com/nm-morais/deMMon-exporter/types/protocoltypes"
-
+	"github.com/nm-morais/deMMon-exporter/types/metrics"
 	lv "github.com/nm-morais/deMMon-exporter/types/metrics/utils"
-	"github.com/nm-morais/go-babel/pkg"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
-
-	"github.com/nm-morais/deMMon-exporter/types/metrics"
-	"github.com/nm-morais/deMMon-exporter/types/metrics/generic"
 )
 
 type ExporterConf struct {
 	ImporterAddr    peer.Peer
 	MaxRedials      int
 	RedialTimeout   time.Duration
-	BpConf          influxdb.BatchPointsConfig
 	ExportFrequency time.Duration
 }
 
@@ -81,73 +72,73 @@ func (e *Exporter) NewHistogram(name string) *InfluxHist {
 // observations are lost if there is a problem with the write. Clients should not
 // need to explicitely export metrics
 func (e *Exporter) Export() (err error) {
-	bp, err := influxdb.NewBatchPoints(e.confs.BpConf)
-	if err != nil {
-		return err
-	}
+	// bp, err := influxdb.NewBatchPoints(e.confs.BpConf)
+	// if err != nil {
+	// 	return err
+	// }
 
-	now := time.Now()
+	// now := time.Now()
 
-	e.counters.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		tags := mergeTags(e.tags, lvs)
-		var p *influxdb.Point
-		fields := map[string]interface{}{"count": sum(values)}
-		p, err = influxdb.NewPoint(name, tags, fields, now)
-		if err != nil {
-			return false
-		}
-		bp.AddPoint(p)
-		return true
-	})
-	if err != nil {
-		return err
-	}
+	// e.counters.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+	// 	tags := mergeTags(e.tags, lvs)
+	// 	var p *influxdb.Point
+	// 	fields := map[string]interface{}{"count": sum(values)}
+	// 	p, err = influxdb.NewPoint(name, tags, fields, now)
+	// 	if err != nil {
+	// 		return false
+	// 	}
+	// 	bp.AddPoint(p)
+	// 	return true
+	// })
+	// if err != nil {
+	// 	return err
+	// }
 
-	e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		tags := mergeTags(e.tags, lvs)
-		var p *influxdb.Point
-		fields := map[string]interface{}{"value": last(values)}
-		p, err = influxdb.NewPoint(name, tags, fields, now)
-		if err != nil {
-			return false
-		}
-		bp.AddPoint(p)
-		return true
-	})
-	if err != nil {
-		return err
-	}
+	// e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+	// 	tags := mergeTags(e.tags, lvs)
+	// 	var p *influxdb.Point
+	// 	fields := map[string]interface{}{"value": last(values)}
+	// 	p, err = influxdb.NewPoint(name, tags, fields, now)
+	// 	if err != nil {
+	// 		return false
+	// 	}
+	// 	bp.AddPoint(p)
+	// 	return true
+	// })
+	// if err != nil {
+	// 	return err
+	// }
 
-	e.histograms.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		histogram := generic.NewHistogram(name, 50)
-		tags := mergeTags(e.tags, lvs)
-		var p *influxdb.Point
-		for _, v := range values {
-			histogram.Observe(v)
-		}
-		fields := map[string]interface{}{
-			"p50": histogram.Quantile(0.50),
-			"p90": histogram.Quantile(0.90),
-			"p95": histogram.Quantile(0.95),
-			"p99": histogram.Quantile(0.99),
-		}
+	// e.histograms.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
+	// 	histogram := generic.NewHistogram(name, 50)
+	// 	tags := mergeTags(e.tags, lvs)
+	// 	var p *influxdb.Point
+	// 	for _, v := range values {
+	// 		histogram.Observe(v)
+	// 	}
+	// 	fields := map[string]interface{}{
+	// 		"p50": histogram.Quantile(0.50),
+	// 		"p90": histogram.Quantile(0.90),
+	// 		"p95": histogram.Quantile(0.95),
+	// 		"p99": histogram.Quantile(0.99),
+	// 	}
 
-		p, err = influxdb.NewPoint(name, tags, fields, now)
+	// 	p, err = influxdb.NewPoint(name, tags, fields, now)
 
-		if err != nil {
-			return false
-		}
-		bp.AddPoint(p)
-		return true
-	})
-	if err != nil {
-		return err
-	}
+	// 	if err != nil {
+	// 		return false
+	// 	}
+	// 	bp.AddPoint(p)
+	// 	return true
+	// })
+	// if err != nil {
+	// 	return err
+	// }
 
-	notifErr := pkg.SendNotification(protocoltypes.NewMetricNotification(bp))
-	if notifErr != nil {
-		return fmt.Errorf(notifErr.Reason())
-	}
+	// notifErr := pkg.SendNotification(protocoltypes.NewMetricNotification(bp))
+	// if notifErr != nil {
+	// 	return fmt.Errorf(notifErr.Reason())
+	// }
 	return
 }
 

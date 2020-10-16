@@ -57,9 +57,6 @@ func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
 }
 
 func (e *ExporterProto) handleMetricNotification(n notification.Notification) {
-	metricNotification := n.(protocoltypes.MetricNotification)
-	metricMessage := protocoltypes.NewMetricMessage(metricNotification.Points)
-	babel.SendMessageSideStream(metricMessage, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, []protocol.ID{importerProtoID})
 }
 
 func (e *ExporterProto) ID() protocol.ID {
