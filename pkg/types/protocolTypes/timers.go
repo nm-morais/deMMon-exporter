@@ -1,4 +1,4 @@
-package protocoltypes
+package protocolTypes
 
 import (
 	"time"

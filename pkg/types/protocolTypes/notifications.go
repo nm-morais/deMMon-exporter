@@ -1,4 +1,4 @@
-package protocoltypes
+package protocolTypes
 
 import (
 	"github.com/nm-morais/go-babel/pkg/notification"
@@ -7,10 +7,13 @@ import (
 const metricNotificationID = 100
 
 type MetricNotification struct {
+	Metrics []byte
 }
 
-func NewMetricNotification() MetricNotification {
-	return MetricNotification{}
+func NewMetricNotification(metrics []byte) MetricNotification {
+	return MetricNotification{
+		Metrics: metrics,
+	}
 }
 
 func (m MetricNotification) ID() notification.ID {

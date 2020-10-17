@@ -1,34 +1,35 @@
-package exporter
+package pkg
 
 import (
-	"github.com/nm-morais/deMMon-exporter/types/protocoltypes"
-	"github.com/nm-morais/go-babel/pkg"
-	babel "github.com/nm-morais/go-babel/pkg"
+	"github.com/nm-morais/deMMon-exporter/pkg/types/protocolTypes"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
 	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
+	"github.com/nm-morais/go-babel/pkg/protocolManager"
 	"github.com/nm-morais/go-babel/pkg/timer"
 	"github.com/sirupsen/logrus"
 )
 
 const (
+	name            = "Exporter"
 	exporterProtoID = 100
 	importerProtoID = 101
-	name            = "exporter"
 )
 
 type ExporterProto struct {
+	babel       protocolManager.ProtocolManager
 	exporter    *Exporter
 	confs       ExporterConf
 	logger      *logrus.Logger
 	failedDials int
 }
 
-func NewExporterProto(confs ExporterConf, exporter *Exporter) *ExporterProto {
+func NewExporterProto(confs ExporterConf, exporter *Exporter, protocolManager protocolManager.ProtocolManager) *ExporterProto {
 	return &ExporterProto{
+		babel:       protocolManager,
 		exporter:    exporter,
 		confs:       confs,
 		failedDials: 0,
@@ -42,11 +43,11 @@ func (e *ExporterProto) MessageDeliveryErr(message message.Message, peer peer.Pe
 }
 
 func (e *ExporterProto) handleRedialTimer(timer timer.Timer) {
-	babel.Dial(e.ID(), e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr())
+	e.babel.Dial(e.ID(), e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr())
 }
 
 func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
-	pkg.RegisterTimer(e.ID(), protocoltypes.NewFlushTimer(e.confs.ExportFrequency))
+	e.babel.RegisterTimer(e.ID(), protocolTypes.NewFlushTimer(e.confs.ExportFrequency))
 	e.logger.Info("Exporting metrics")
 	err := e.exporter.Export()
 	if err != nil {
@@ -57,6 +58,9 @@ func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
 }
 
 func (e *ExporterProto) handleMetricNotification(n notification.Notification) {
+	metricsNotification := n.(protocolTypes.MetricNotification)
+	metricMessage := protocolTypes.NewMetricMessage(metricsNotification.Metrics)
+	e.babel.SendMessageSideStream(metricMessage, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, importerProtoID)
 }
 
 func (e *ExporterProto) ID() protocol.ID {
@@ -72,8 +76,8 @@ func (e *ExporterProto) Logger() *logrus.Logger {
 }
 
 func (e *ExporterProto) Init() {
-	babel.RegisterNotificationHandler(e.ID(), protocoltypes.MetricNotification{}, e.handleMetricNotification)
-	babel.RegisterTimerHandler(e.ID(), protocoltypes.NewFlushTimer(0).ID(), e.handleFlushTimer)
+	e.babel.RegisterNotificationHandler(e.ID(), protocolTypes.MetricNotification{}, e.handleMetricNotification)
+	e.babel.RegisterTimerHandler(e.ID(), protocolTypes.NewFlushTimer(0).ID(), e.handleFlushTimer)
 
 	// babel.RegisterTimerHandler(e.ID(), NewRedialTimer(0).ID(), e.handleRedialTimer)
 }
@@ -83,7 +87,7 @@ func (e *ExporterProto) Start() {
 	// 	// go e.handleGauge(g)
 	// }
 	// babel.Dial(e.confs.ImporterAddr, e.ID(), stream.NewUDPDialer())
-	pkg.RegisterTimer(e.ID(), protocoltypes.NewFlushTimer(0))
+	e.babel.RegisterTimer(e.ID(), protocolTypes.NewFlushTimer(0))
 }
 
 func (e *ExporterProto) DialFailed(p peer.Peer) {
@@ -93,7 +97,7 @@ func (e *ExporterProto) DialFailed(p peer.Peer) {
 		e.logger.Panicln("Could not dial importer")
 	}
 
-	babel.RegisterTimer(e.ID(), protocoltypes.NewRedialTimer(e.confs.RedialTimeout))
+	e.babel.RegisterTimer(e.ID(), protocolTypes.NewRedialTimer(e.confs.RedialTimeout))
 }
 
 func (e *ExporterProto) DialSuccess(sourceProto protocol.ID, peer peer.Peer) bool {
