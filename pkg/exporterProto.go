@@ -1,7 +1,7 @@
 package pkg
 
 import (
-	"github.com/nm-morais/deMMon-exporter/pkg/types/protocolTypes"
+	"github.com/nm-morais/demmon-exporter/pkg/types/protocolTypes"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
