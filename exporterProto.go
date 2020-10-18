@@ -1,11 +1,10 @@
-package pkg
+package exporter
 
 import (
-	"github.com/nm-morais/demmon-exporter/pkg/types/protocolTypes"
+	"github.com/nm-morais/demmon-exporter/types/protocolTypes"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
 	"github.com/nm-morais/go-babel/pkg/message"
-	"github.com/nm-morais/go-babel/pkg/notification"
 	"github.com/nm-morais/go-babel/pkg/peer"
 	"github.com/nm-morais/go-babel/pkg/protocol"
 	"github.com/nm-morais/go-babel/pkg/protocolManager"
@@ -49,18 +48,11 @@ func (e *ExporterProto) handleRedialTimer(timer timer.Timer) {
 func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
 	e.babel.RegisterTimer(e.ID(), protocolTypes.NewFlushTimer(e.confs.ExportFrequency))
 	e.logger.Info("Exporting metrics")
-	err := e.exporter.Export()
 	if err != nil {
 		e.logger.Error(err)
 		return
 	}
 	e.logger.Info("Exported metrics successfully")
-}
-
-func (e *ExporterProto) handleMetricNotification(n notification.Notification) {
-	metricsNotification := n.(protocolTypes.MetricNotification)
-	metricMessage := protocolTypes.NewMetricMessage(metricsNotification.Metrics)
-	e.babel.SendMessageSideStream(metricMessage, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, importerProtoID)
 }
 
 func (e *ExporterProto) ID() protocol.ID {
