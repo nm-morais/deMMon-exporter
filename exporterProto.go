@@ -1,6 +1,8 @@
 package exporter
 
 import (
+	"bytes"
+
 	"github.com/nm-morais/demmon-exporter/types/protocolTypes"
 	"github.com/nm-morais/go-babel/pkg/errors"
 	"github.com/nm-morais/go-babel/pkg/logs"
@@ -14,8 +16,8 @@ import (
 
 const (
 	name            = "Exporter"
-	exporterProtoID = 100
-	importerProtoID = 101
+	exporterProtoID = 1020
+	importerProtoID = 1010
 )
 
 type ExporterProto struct {
@@ -48,11 +50,12 @@ func (e *ExporterProto) handleRedialTimer(timer timer.Timer) {
 func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
 	e.babel.RegisterTimer(e.ID(), protocolTypes.NewFlushTimer(e.confs.ExportFrequency))
 	e.logger.Info("Exporting metrics")
-	if err != nil {
-		e.logger.Error(err)
-		return
-	}
-	e.logger.Info("Exported metrics successfully")
+	buf := &bytes.Buffer{}
+	e.exporter.WriteMetrics(buf)
+	metricsMsg := protocolTypes.NewMetricMessage(buf.Bytes())
+	e.logger.Info("Exporting metrics:")
+	e.logger.Info(string(buf.Bytes()))
+	e.babel.SendMessageSideStream(metricsMsg, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, importerProtoID)
 }
 
 func (e *ExporterProto) ID() protocol.ID {
@@ -68,9 +71,7 @@ func (e *ExporterProto) Logger() *logrus.Logger {
 }
 
 func (e *ExporterProto) Init() {
-	e.babel.RegisterNotificationHandler(e.ID(), protocolTypes.MetricNotification{}, e.handleMetricNotification)
 	e.babel.RegisterTimerHandler(e.ID(), protocolTypes.NewFlushTimer(0).ID(), e.handleFlushTimer)
-
 	// babel.RegisterTimerHandler(e.ID(), NewRedialTimer(0).ID(), e.handleRedialTimer)
 }
 

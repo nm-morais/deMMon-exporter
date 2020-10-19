@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"io"
 	"time"
 
 	"github.com/nm-morais/demmon-common/metrics"
@@ -49,4 +50,8 @@ func (e *Exporter) NewGauge(name string, f func() float64) *metrics.Gauge {
 // Proto returns the babel proto of the exporter.
 func (e *Exporter) NewHistogram(name string) *metrics.Histogram {
 	return e.set.NewHistogram(name)
+}
+
+func (e *Exporter) WriteMetrics(w io.Writer) {
+	e.set.WriteMetrics(w)
 }

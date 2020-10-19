@@ -8,6 +8,5 @@ require (
 	github.com/sirupsen/logrus v1.7.0
 )
 
-replace github.com/nm-morais/go-babel => ../go-babel
-
 replace github.com/nm-morais/demmon-common => ../demmon-common
+replace github.com/nm-morais/go-babel => ../go-babel
