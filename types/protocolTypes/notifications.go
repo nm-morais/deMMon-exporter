@@ -4,7 +4,7 @@ import (
 	"github.com/nm-morais/go-babel/pkg/notification"
 )
 
-const metricNotificationID = 100
+const metricNotificationID = 3000
 
 type MetricNotification struct {
 	Metrics []byte

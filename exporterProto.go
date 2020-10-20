@@ -16,8 +16,8 @@ import (
 
 const (
 	name            = "Exporter"
-	exporterProtoID = 1020
-	importerProtoID = 1010
+	exporterProtoID = 3000
+	importerProtoID = 4000
 )
 
 type ExporterProto struct {
@@ -49,11 +49,10 @@ func (e *ExporterProto) handleRedialTimer(timer timer.Timer) {
 
 func (e *ExporterProto) handleFlushTimer(timer timer.Timer) {
 	e.babel.RegisterTimer(e.ID(), protocolTypes.NewFlushTimer(e.confs.ExportFrequency))
-	e.logger.Info("Exporting metrics")
 	buf := &bytes.Buffer{}
 	e.exporter.WriteMetrics(buf)
 	metricsMsg := protocolTypes.NewMetricMessage(buf.Bytes())
-	e.logger.Info("Exporting metrics:")
+	e.logger.Infof("Exporting metrics: %s", string(buf.Bytes()))
 	e.logger.Info(string(buf.Bytes()))
 	e.babel.SendMessageSideStream(metricsMsg, e.confs.ImporterAddr, e.confs.ImporterAddr.ToUDPAddr(), exporterProtoID, importerProtoID)
 }
