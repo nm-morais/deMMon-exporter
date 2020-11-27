@@ -31,9 +31,8 @@ type Conf struct {
 	DialAttempts    int
 	DialBackoffTime time.Duration
 
-	DialTimeout                time.Duration
-	RegisterMetricsBackoffTime time.Duration
-	RequestTimeout             time.Duration
+	DialTimeout    time.Duration
+	RequestTimeout time.Duration
 }
 
 type Exporter struct {
@@ -53,7 +52,6 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 		DemmonPort:     confs.ImporterPort,
 		DemmonHostAddr: confs.ImporterHost,
 		RequestTimeout: confs.RequestTimeout,
-		ChunkSize:      512,
 	}
 
 	if tags == nil {
@@ -69,18 +67,16 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 		logger:     logrus.New(),
 		conf:       confs,
 	}
-	c, err := client.New(clientConf, e.onClientErr)
-	if err != nil {
-		return nil, err
-	}
+	c := client.New(clientConf)
 	e.client = c
 	var connectErr error
 	for i := 0; i < confs.DialAttempts; i++ {
 		connectErr = c.ConnectTimeout(confs.DialTimeout)
-		if err != nil {
+		if connectErr != nil {
 			time.Sleep(confs.DialBackoffTime) // sleep and retry
 			continue
 		}
+		break
 	}
 	if connectErr != nil {
 		return nil, connectErr
@@ -114,10 +110,6 @@ func (e *Exporter) NewHistogram(name string, upperBucketBounds []float64) *Histo
 	}
 }
 
-func (e *Exporter) onClientErr(err error) {
-	e.logger.Panicf("got error from client %s", err)
-}
-
 func (e *Exporter) ExportLoop(ctx context.Context, c <-chan time.Time) {
 	e.logger.Info("Starting export loop")
 	for {
@@ -135,14 +127,14 @@ func (e *Exporter) ExportLoop(ctx context.Context, c <-chan time.Time) {
 
 func (e *Exporter) Export() (err error) {
 	now := time.Now()
-	bp := body_types.PointCollection{}
+	bp := body_types.PointCollectionWithTagsAndName{}
 	e.counters.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
 		tags := mergeTags(e.tags, lvs)
-		var p *body_types.Point
+		var p *body_types.PointWithTagsAndName
 		v := sum(values)
 		fields := map[string]interface{}{"count": v}
-		e.logger.Infof("Exporting counter %s with val %+v", name, v)
-		p = body_types.NewPoint(name, tags, fields, now.UnixNano())
+		// e.logger.Infof("Exporting counter %s with val %+v", name, v)
+		p = body_types.NewPoint(name, tags, fields, now)
 		bp = append(bp, p)
 		return true
 	})
@@ -152,10 +144,10 @@ func (e *Exporter) Export() (err error) {
 
 	e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
 		tags := mergeTags(e.tags, lvs)
-		var p *body_types.Point
+		var p *body_types.PointWithTagsAndName
 		fields := map[string]interface{}{"value": last(values)}
-		e.logger.Infof("Exporting gauge %s with val %+v", name, last(values))
-		p = body_types.NewPoint(name, tags, fields, now.UnixNano())
+		// e.logger.Infof("Exporting gauge %s with val %+v", name, last(values))
+		p = body_types.NewPoint(name, tags, fields, now)
 		bp = append(bp, p)
 		return true
 	})
@@ -170,13 +162,13 @@ func (e *Exporter) Export() (err error) {
 		}
 		histogram := generic.NewHistogram(name, histBounds)
 		tags := mergeTags(e.tags, lvs)
-		var p *body_types.Point
+		var p *body_types.PointWithTagsAndName
 		for _, v := range values {
 			histogram.Observe(v)
 		}
 		fields := histogram.Value()
-		e.logger.Infof("Exporting histogram %s with ranges %+v and fields %+v", name, histBounds, fields)
-		p = body_types.NewPoint(name, tags, fields, now.UnixNano())
+		// e.logger.Infof("Exporting histogram %s with ranges %+v and fields %+v", name, histBounds, fields)
+		p = body_types.NewPoint(name, tags, fields, now)
 		bp = append(bp, p)
 
 		return true
