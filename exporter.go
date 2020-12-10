@@ -42,6 +42,8 @@ type Exporter struct {
 	histograms *lv.Space
 	tags       map[string]string
 
+	bucketGranularities map[string]int
+
 	client *client.DemmonClient
 	logger *logrus.Logger
 	conf   Conf
@@ -60,12 +62,13 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 	tags["service"] = service
 	tags["host"] = host
 	e := &Exporter{
-		counters:   lv.NewSpace(),
-		gauges:     lv.NewSpace(),
-		histograms: lv.NewSpace(),
-		tags:       tags,
-		logger:     logrus.New(),
-		conf:       confs,
+		counters:            lv.NewSpace(),
+		gauges:              lv.NewSpace(),
+		histograms:          lv.NewSpace(),
+		tags:                tags,
+		logger:              logrus.New(),
+		conf:                confs,
+		bucketGranularities: make(map[string]int),
 	}
 	c := client.New(clientConf)
 	e.client = c
@@ -86,7 +89,8 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 }
 
 // NewCounter returns an Influx counter.
-func (e *Exporter) NewCounter(name string) *Counter {
+func (e *Exporter) NewCounter(name string, nrSamplesToStore int) *Counter {
+	e.bucketGranularities[name] = nrSamplesToStore
 	return &Counter{
 		name: name,
 		obs:  e.counters.Observe,
@@ -94,7 +98,8 @@ func (e *Exporter) NewCounter(name string) *Counter {
 }
 
 // NewGauge returns an Influx gauge.
-func (e *Exporter) NewGauge(name string) *Gauge {
+func (e *Exporter) NewGauge(name string, nrSamplesToStore int) *Gauge {
+	e.bucketGranularities[name] = nrSamplesToStore
 	return &Gauge{
 		name: name,
 		obs:  e.gauges.Observe,
@@ -102,24 +107,36 @@ func (e *Exporter) NewGauge(name string) *Gauge {
 	}
 }
 
-func (e *Exporter) NewHistogram(name string, upperBucketBounds []float64) *Histogram {
-	e.histBounds[name] = upperBucketBounds
+func (e *Exporter) NewHistogram(name string, nrSamplesToStore int, upperBucketBounds []float64) *Histogram {
+	e.bucketGranularities[name] = nrSamplesToStore
 	return &Histogram{
 		name: name,
 		obs:  e.histograms.Observe,
 	}
 }
 
-func (e *Exporter) ExportLoop(ctx context.Context, c <-chan time.Time) {
+func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 	e.logger.Info("Starting export loop")
+	t := time.NewTicker(interval)
+
+	for bName, bSampleCount := range e.bucketGranularities {
+		e.logger.Info("installing buckets...")
+		err := e.client.InstallBucket(bName, interval, bSampleCount)
+		if err != nil {
+			e.logger.Panic(err)
+		}
+	}
+
 	for {
 		select {
-		case <-c:
+		case <-t.C:
 			if err := e.Export(); err != nil {
 				e.logger.Errorf("Error exporting: %s", err)
+				continue
 			}
 			e.logger.Info("Exported metrics successfully")
 		case <-ctx.Done():
+			e.logger.Error("Context is done")
 			return
 		}
 	}
@@ -138,9 +155,6 @@ func (e *Exporter) Export() (err error) {
 		bp = append(bp, p)
 		return true
 	})
-	if err != nil {
-		return err
-	}
 
 	e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
 		tags := mergeTags(e.tags, lvs)
@@ -151,9 +165,6 @@ func (e *Exporter) Export() (err error) {
 		bp = append(bp, p)
 		return true
 	})
-	if err != nil {
-		return err
-	}
 
 	e.histograms.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
 		histBounds, ok := e.histBounds[name]
@@ -170,11 +181,11 @@ func (e *Exporter) Export() (err error) {
 		// e.logger.Infof("Exporting histogram %s with ranges %+v and fields %+v", name, histBounds, fields)
 		p = body_types.NewPoint(name, tags, fields, now)
 		bp = append(bp, p)
-
 		return true
 	})
-	if err != nil {
-		return err
+	e.logger.Infof("exporting metrics...")
+	for _, ts := range bp {
+		e.logger.Infof("%s:%s:%+v", ts.Name, ts.Tags, ts.Point)
 	}
 	return e.client.PushMetricBlob(bp)
 }
@@ -224,10 +235,12 @@ func setupLogger(logger *logrus.Logger, logFolder, logFile string, silent bool) 
 		}
 	}
 	var out io.Writer = file
-	if !silent {
-		out = io.MultiWriter(os.Stdout, file)
+	if silent {
+		logger.SetOutput(out)
 		fmt.Println("Setting exporter silently")
+		return
 	}
+	out = io.MultiWriter(os.Stdout, file)
 	logger.SetOutput(out)
 }
 

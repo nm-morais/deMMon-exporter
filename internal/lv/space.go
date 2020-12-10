@@ -15,6 +15,14 @@ type Space struct {
 	nodes map[string]*node
 }
 
+func (s *Space) NodeNames() []string {
+	toReturn := []string{}
+	for nodeName := range s.nodes {
+		toReturn = append(toReturn, nodeName)
+	}
+	return toReturn
+}
+
 // Observe locates the time series identified by the name and label values in
 // the vector space, and appends the value to the list of observations.
 func (s *Space) Observe(name string, lvs LabelValues, value float64) {
