@@ -46,10 +46,10 @@ type Exporter struct {
 
 	client *client.DemmonClient
 	logger *logrus.Logger
-	conf   Conf
+	conf   *Conf
 }
 
-func New(confs Conf, host, service string, tags map[string]string) (*Exporter, error) {
+func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, error) {
 	clientConf := client.DemmonClientConf{
 		DemmonPort:     confs.ImporterPort,
 		DemmonHostAddr: confs.ImporterHost,
@@ -59,8 +59,10 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 	if tags == nil {
 		tags = map[string]string{}
 	}
+
 	tags["service"] = service
 	tags["host"] = host
+
 	e := &Exporter{
 		counters:            lv.NewSpace(),
 		gauges:              lv.NewSpace(),
@@ -70,27 +72,35 @@ func New(confs Conf, host, service string, tags map[string]string) (*Exporter, e
 		conf:                confs,
 		bucketGranularities: make(map[string]int),
 	}
+
 	c := client.New(clientConf)
 	e.client = c
+
 	var connectErr error
+
 	for i := 0; i < confs.DialAttempts; i++ {
 		connectErr = c.ConnectTimeout(confs.DialTimeout)
 		if connectErr != nil {
 			time.Sleep(confs.DialBackoffTime) // sleep and retry
 			continue
 		}
+
 		break
 	}
+
 	if connectErr != nil {
 		return nil, connectErr
 	}
+
 	setupLogger(e.logger, e.conf.LogFolder, e.conf.LogFile, e.conf.Silent)
+
 	return e, nil
 }
 
 // NewCounter returns an Influx counter.
 func (e *Exporter) NewCounter(name string, nrSamplesToStore int) *Counter {
 	e.bucketGranularities[name] = nrSamplesToStore
+
 	return &Counter{
 		name: name,
 		obs:  e.counters.Observe,
@@ -100,6 +110,7 @@ func (e *Exporter) NewCounter(name string, nrSamplesToStore int) *Counter {
 // NewGauge returns an Influx gauge.
 func (e *Exporter) NewGauge(name string, nrSamplesToStore int) *Gauge {
 	e.bucketGranularities[name] = nrSamplesToStore
+
 	return &Gauge{
 		name: name,
 		obs:  e.gauges.Observe,
@@ -109,6 +120,7 @@ func (e *Exporter) NewGauge(name string, nrSamplesToStore int) *Gauge {
 
 func (e *Exporter) NewHistogram(name string, nrSamplesToStore int, upperBucketBounds []float64) *Histogram {
 	e.bucketGranularities[name] = nrSamplesToStore
+
 	return &Histogram{
 		name: name,
 		obs:  e.histograms.Observe,
@@ -117,11 +129,13 @@ func (e *Exporter) NewHistogram(name string, nrSamplesToStore int, upperBucketBo
 
 func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 	e.logger.Info("Starting export loop")
+
 	t := time.NewTicker(interval)
 
 	for bName, bSampleCount := range e.bucketGranularities {
 		e.logger.Info("installing buckets...")
 		err := e.client.InstallBucket(bName, interval, bSampleCount)
+
 		if err != nil {
 			e.logger.Panic(err)
 		}
@@ -134,6 +148,7 @@ func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 				e.logger.Errorf("Error exporting: %s", err)
 				continue
 			}
+
 			e.logger.Info("Exported metrics successfully")
 		case <-ctx.Done():
 			e.logger.Error("Context is done")
@@ -145,48 +160,55 @@ func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 func (e *Exporter) Export() (err error) {
 	now := time.Now()
 	bp := body_types.PointCollectionWithTagsAndName{}
-	e.counters.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		tags := mergeTags(e.tags, lvs)
-		var p *body_types.PointWithTagsAndName
-		v := sum(values)
-		fields := map[string]interface{}{"count": v}
-		// e.logger.Infof("Exporting counter %s with val %+v", name, v)
-		p = body_types.NewPoint(name, tags, fields, now)
-		bp = append(bp, p)
-		return true
-	})
 
-	e.gauges.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		tags := mergeTags(e.tags, lvs)
-		var p *body_types.PointWithTagsAndName
-		fields := map[string]interface{}{"value": last(values)}
-		// e.logger.Infof("Exporting gauge %s with val %+v", name, last(values))
-		p = body_types.NewPoint(name, tags, fields, now)
-		bp = append(bp, p)
-		return true
-	})
-
-	e.histograms.Reset().Walk(func(name string, lvs lv.LabelValues, values []float64) bool {
-		histBounds, ok := e.histBounds[name]
-		if !ok {
-			e.logger.Panicf("No bounds fot histogram %s", name)
-		}
-		histogram := generic.NewHistogram(name, histBounds)
-		tags := mergeTags(e.tags, lvs)
-		var p *body_types.PointWithTagsAndName
-		for _, v := range values {
-			histogram.Observe(v)
-		}
-		fields := histogram.Value()
-		// e.logger.Infof("Exporting histogram %s with ranges %+v and fields %+v", name, histBounds, fields)
-		p = body_types.NewPoint(name, tags, fields, now)
-		bp = append(bp, p)
-		return true
-	})
 	e.logger.Infof("exporting metrics...")
+
+	e.counters.Reset().Walk(
+		func(name string, lvs lv.LabelValues, values []float64) bool {
+			tags := mergeTags(e.tags, lvs)
+			var p *body_types.PointWithTagsAndName
+			v := sum(values)
+			fields := map[string]interface{}{"count": v}
+			p = body_types.NewPoint(name, tags, fields, now)
+			bp = append(bp, p)
+			return true
+		},
+	)
+
+	e.gauges.Reset().Walk(
+		func(name string, lvs lv.LabelValues, values []float64) bool {
+			tags := mergeTags(e.tags, lvs)
+			var p *body_types.PointWithTagsAndName
+			fields := map[string]interface{}{"value": last(values)}
+			p = body_types.NewPoint(name, tags, fields, now)
+			bp = append(bp, p)
+			return true
+		},
+	)
+
+	e.histograms.Reset().Walk(
+		func(name string, lvs lv.LabelValues, values []float64) bool {
+			histBounds, ok := e.histBounds[name]
+			if !ok {
+				e.logger.Panicf("No bounds fot histogram %s", name)
+			}
+			histogram := generic.NewHistogram(name, histBounds)
+			tags := mergeTags(e.tags, lvs)
+			var p *body_types.PointWithTagsAndName
+			for _, v := range values {
+				histogram.Observe(v)
+			}
+			fields := histogram.Value()
+			p = body_types.NewPoint(name, tags, fields, now)
+			bp = append(bp, p)
+			return true
+		},
+	)
+
 	for _, ts := range bp {
 		e.logger.Infof("%s:%s:%+v", ts.Name, ts.Tags, ts.Point)
 	}
+
 	return e.client.PushMetricBlob(bp)
 }
 
@@ -201,45 +223,55 @@ func (f *formatter) Format(e *logrus.Entry) ([]byte, error) {
 }
 
 func setupLogger(logger *logrus.Logger, logFolder, logFile string, silent bool) {
-	logger.SetFormatter(&formatter{
-		owner: "demmon_exporter",
-		lf: &logrus.TextFormatter{
-			DisableColors:   true,
-			ForceColors:     false,
-			FullTimestamp:   true,
-			TimestampFormat: time.StampMilli,
+	logger.SetFormatter(
+		&formatter{
+			owner: "demmon_exporter",
+			lf: &logrus.TextFormatter{
+				DisableColors:   true,
+				ForceColors:     false,
+				FullTimestamp:   true,
+				TimestampFormat: time.StampMilli,
+			},
 		},
-	})
+	)
 
 	if logFolder == "" {
 		logger.Panicf("Invalid logFolder '%s'", logFolder)
 	}
+
 	if logFile == "" {
 		logger.Panicf("Invalid logFile '%s'", logFile)
 	}
 
 	filePath := fmt.Sprintf("%s/%s", logFolder, logFile)
 	err := os.MkdirAll(logFolder, 0777)
+
 	if err != nil {
 		logger.Panic(err)
 	}
+
 	file, err := os.Create(filePath)
 	if os.IsExist(err) {
 		var err = os.Remove(filePath)
 		if err != nil {
 			logger.Panic(err)
 		}
+
 		file, err = os.Create(filePath)
 		if err != nil {
 			logger.Panic(err)
 		}
 	}
+
 	var out io.Writer = file
+
 	if silent {
 		logger.SetOutput(out)
 		fmt.Println("Setting exporter silently")
+
 		return
 	}
+
 	out = io.MultiWriter(os.Stdout, file)
 	logger.SetOutput(out)
 }
@@ -316,13 +348,17 @@ func mergeTags(tags map[string]string, labelValues []string) map[string]string {
 	if len(labelValues)%2 != 0 {
 		panic("mergeTags received a labelValues with an odd number of strings")
 	}
+
 	ret := make(map[string]string, len(tags)+len(labelValues)/2)
+
 	for k, v := range tags {
 		ret[k] = v
 	}
+
 	for i := 0; i < len(labelValues); i += 2 {
 		ret[labelValues[i]] = labelValues[i+1]
 	}
+
 	return ret
 }
 
@@ -331,6 +367,7 @@ func sum(a []float64) float64 {
 	for _, f := range a {
 		v += f
 	}
+
 	return v
 }
 

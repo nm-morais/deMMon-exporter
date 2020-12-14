@@ -2,6 +2,8 @@ package lv
 
 import "sync"
 
+const minLabelValues = 2
+
 // NewSpace returns an N-dimensional vector space.
 func NewSpace() *Space {
 	return &Space{}
@@ -16,10 +18,11 @@ type Space struct {
 }
 
 func (s *Space) NodeNames() []string {
-	toReturn := []string{}
+	toReturn := make([]string, 0)
 	for nodeName := range s.nodes {
 		toReturn = append(toReturn, nodeName)
 	}
+
 	return toReturn
 }
 
@@ -41,8 +44,11 @@ func (s *Space) Add(name string, lvs LabelValues, delta float64) {
 func (s *Space) Walk(fn func(name string, lvs LabelValues, observations []float64) bool) {
 	s.mtx.RLock()
 	defer s.mtx.RUnlock()
-	for name, node := range s.nodes {
-		f := func(lvs LabelValues, observations []float64) bool { return fn(name, lvs, observations) }
+
+	for nodeName, node := range s.nodes {
+		nodeNameCopy := nodeName
+		f := func(lvs LabelValues, observations []float64) bool { return fn(nodeNameCopy, lvs, observations) }
+
 		if !node.walk(LabelValues{}, f) {
 			return
 		}
@@ -54,22 +60,27 @@ func (s *Space) Walk(fn func(name string, lvs LabelValues, observations []float6
 func (s *Space) Reset() *Space {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
 	n := NewSpace()
 	n.nodes, s.nodes = s.nodes, n.nodes
+
 	return n
 }
 
 func (s *Space) nodeFor(name string) *node {
 	s.mtx.Lock()
 	defer s.mtx.Unlock()
+
 	if s.nodes == nil {
 		s.nodes = map[string]*node{}
 	}
+
 	n, ok := s.nodes[name]
 	if !ok {
 		n = &node{}
 		s.nodes[name] = n
 	}
+
 	return n
 }
 
@@ -87,64 +98,81 @@ type pair struct{ label, value string }
 func (n *node) observe(lvs LabelValues, value float64) {
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
-	if len(lvs) <= 0 {
+
+	if len(lvs) == 0 {
 		n.observations = append(n.observations, value)
 		return
 	}
-	if len(lvs) < 2 {
+
+	if len(lvs) < minLabelValues {
 		panic("too few LabelValues; programmer error!")
 	}
+
 	head, tail := pair{lvs[0], lvs[1]}, lvs[2:]
+
 	if n.children == nil {
 		n.children = map[pair]*node{}
 	}
+
 	child, ok := n.children[head]
 	if !ok {
 		child = &node{}
 		n.children[head] = child
 	}
+
 	child.observe(tail, value)
 }
 
 func (n *node) add(lvs LabelValues, delta float64) {
 	n.mtx.Lock()
 	defer n.mtx.Unlock()
-	if len(lvs) <= 0 {
+
+	if len(lvs) == 0 {
 		var value float64
 		if len(n.observations) > 0 {
 			value = last(n.observations) + delta
 		} else {
 			value = delta
 		}
+
 		n.observations = append(n.observations, value)
+
 		return
 	}
-	if len(lvs) < 2 {
+
+	if len(lvs) < minLabelValues {
 		panic("too few LabelValues; programmer error!")
 	}
+
 	head, tail := pair{lvs[0], lvs[1]}, lvs[2:]
+
 	if n.children == nil {
 		n.children = map[pair]*node{}
 	}
+
 	child, ok := n.children[head]
 	if !ok {
 		child = &node{}
 		n.children[head] = child
 	}
+
 	child.add(tail, delta)
 }
 
 func (n *node) walk(lvs LabelValues, fn func(LabelValues, []float64) bool) bool {
 	n.mtx.RLock()
 	defer n.mtx.RUnlock()
+
 	if len(n.observations) > 0 && !fn(lvs, n.observations) {
 		return false
 	}
+
 	for p, child := range n.children {
 		if !child.walk(append(lvs, p.label, p.value), fn) {
 			return false
 		}
 	}
+
 	return true
 }
 

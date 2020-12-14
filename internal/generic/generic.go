@@ -7,6 +7,8 @@ import (
 	"go.uber.org/atomic"
 )
 
+const defaultHistIncrement = 1.0
+
 type bucket struct {
 	atomic.Float64
 	upper float64 // bucket upper bound, inclusive
@@ -19,9 +21,11 @@ func NewBuckets(upperBounds []float64) Buckets {
 	for _, upper := range upperBounds {
 		bs = append(bs, &bucket{upper: upper})
 	}
+
 	if upperBounds[len(upperBounds)-1] != math.MaxFloat64 {
 		bs = append(bs, &bucket{upper: math.MaxFloat64})
 	}
+
 	return bs
 }
 
@@ -37,6 +41,7 @@ func (bs Buckets) get(val float64) *bucket {
 			j = h
 		}
 	}
+
 	return bs[i]
 }
 
@@ -57,18 +62,22 @@ func (h *Histogram) Observe(value float64) {
 	if h == nil {
 		return
 	}
+
 	h.IncBucket(value)
 }
 
 func (h *Histogram) Value() map[string]interface{} {
 	values := make(map[string]interface{})
+
 	for idx, b := range h.Buckets {
 		if idx == 0 {
 			continue
 		}
+
 		tag := fmt.Sprintf("%f-%f", h.Buckets[idx-1].upper, b.upper)
 		values[tag] = b.Load()
 	}
+
 	return values
 }
 
@@ -76,6 +85,7 @@ func (h *Histogram) IncBucket(n float64) {
 	if h == nil {
 		return
 	}
+
 	bucket := h.Buckets.get(n)
-	bucket.Add(1.0)
+	bucket.Add(defaultHistIncrement)
 }
