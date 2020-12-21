@@ -159,18 +159,16 @@ func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 
 func (e *Exporter) Export() (err error) {
 	now := time.Now()
-	bp := body_types.PointCollectionWithTagsAndName{}
+	bp := []*body_types.TimeseriesDTO{}
 
 	e.logger.Infof("exporting metrics...")
 
 	e.counters.Reset().Walk(
 		func(name string, lvs lv.LabelValues, values []float64) bool {
 			tags := mergeTags(e.tags, lvs)
-			var p *body_types.PointWithTagsAndName
 			v := sum(values)
 			fields := map[string]interface{}{"count": v}
-			p = body_types.NewPoint(name, tags, fields, now)
-			bp = append(bp, p)
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
 			return true
 		},
 	)
@@ -178,10 +176,8 @@ func (e *Exporter) Export() (err error) {
 	e.gauges.Reset().Walk(
 		func(name string, lvs lv.LabelValues, values []float64) bool {
 			tags := mergeTags(e.tags, lvs)
-			var p *body_types.PointWithTagsAndName
 			fields := map[string]interface{}{"value": last(values)}
-			p = body_types.NewPoint(name, tags, fields, now)
-			bp = append(bp, p)
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
 			return true
 		},
 	)
@@ -194,19 +190,17 @@ func (e *Exporter) Export() (err error) {
 			}
 			histogram := generic.NewHistogram(name, histBounds)
 			tags := mergeTags(e.tags, lvs)
-			var p *body_types.PointWithTagsAndName
 			for _, v := range values {
 				histogram.Observe(v)
 			}
 			fields := histogram.Value()
-			p = body_types.NewPoint(name, tags, fields, now)
-			bp = append(bp, p)
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
 			return true
 		},
 	)
 
 	for _, ts := range bp {
-		e.logger.Infof("%s:%s:%+v", ts.Name, ts.Tags, ts.Point)
+		e.logger.Infof("%s:%s:%+v", ts.MeasurementName, ts.TSTags, ts.Values)
 	}
 
 	return e.client.PushMetricBlob(bp)
