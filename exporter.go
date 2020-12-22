@@ -159,7 +159,7 @@ func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 
 func (e *Exporter) Export() (err error) {
 	now := time.Now()
-	bp := []*body_types.TimeseriesDTO{}
+	bp := []body_types.TimeseriesDTO{}
 
 	e.logger.Infof("exporting metrics...")
 
@@ -168,7 +168,7 @@ func (e *Exporter) Export() (err error) {
 			tags := mergeTags(e.tags, lvs)
 			v := sum(values)
 			fields := map[string]interface{}{"count": v}
-			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservableDTO(fields, now)))
 			return true
 		},
 	)
@@ -177,7 +177,7 @@ func (e *Exporter) Export() (err error) {
 		func(name string, lvs lv.LabelValues, values []float64) bool {
 			tags := mergeTags(e.tags, lvs)
 			fields := map[string]interface{}{"value": last(values)}
-			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservableDTO(fields, now)))
 			return true
 		},
 	)
@@ -194,7 +194,7 @@ func (e *Exporter) Export() (err error) {
 				histogram.Observe(v)
 			}
 			fields := histogram.Value()
-			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservable(fields, now)))
+			bp = append(bp, body_types.NewTimeseriesDTO(name, tags, body_types.NewObservableDTO(fields, now)))
 			return true
 		},
 	)
