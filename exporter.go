@@ -49,7 +49,7 @@ type Exporter struct {
 	conf   *Conf
 }
 
-func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, error) {
+func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, error, chan error) {
 	clientConf := client.DemmonClientConf{
 		DemmonPort:     confs.ImporterPort,
 		DemmonHostAddr: confs.ImporterHost,
@@ -78,8 +78,10 @@ func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, 
 
 	var connectErr error
 
+	var errChan chan error
+
 	for i := 0; i < confs.DialAttempts; i++ {
-		connectErr = c.ConnectTimeout(confs.DialTimeout)
+		connectErr, errChan = c.ConnectTimeout(confs.DialTimeout)
 		if connectErr != nil {
 			time.Sleep(confs.DialBackoffTime) // sleep and retry
 			continue
@@ -89,12 +91,12 @@ func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, 
 	}
 
 	if connectErr != nil {
-		return nil, connectErr
+		return nil, connectErr, errChan
 	}
 
 	setupLogger(e.logger, e.conf.LogFolder, e.conf.LogFile, e.conf.Silent)
 
-	return e, nil
+	return e, nil, nil
 }
 
 // NewCounter returns an Influx counter.
