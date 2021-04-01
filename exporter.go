@@ -201,9 +201,9 @@ func (e *Exporter) Export() (err error) {
 		},
 	)
 
-	for _, ts := range bp {
-		e.logger.Infof("%s:%s:%+v", ts.MeasurementName, ts.TSTags, ts.Values)
-	}
+	// for _, ts := range bp {
+	// 	e.logger.Infof("%s:%s:%+v", ts.MeasurementName, ts.TSTags, ts.Values)
+	// }
 
 	return e.client.PushMetricBlob(bp)
 }
