@@ -151,9 +151,9 @@ func (e *Exporter) ExportLoop(ctx context.Context, interval time.Duration) {
 				continue
 			}
 
-			e.logger.Info("Exported metrics successfully")
+			e.logger.Trace("Exported metrics successfully")
 		case <-ctx.Done():
-			e.logger.Error("Context is done")
+			e.logger.Trace("Context is done")
 			return
 		}
 	}
@@ -163,7 +163,7 @@ func (e *Exporter) Export() (err error) {
 	now := time.Now()
 	bp := []body_types.TimeseriesDTO{}
 
-	e.logger.Infof("exporting metrics...")
+	e.logger.Tracef("exporting metrics...")
 
 	e.counters.Reset().Walk(
 		func(name string, lvs lv.LabelValues, values []float64) bool {
