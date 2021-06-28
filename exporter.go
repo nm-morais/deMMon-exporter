@@ -31,8 +31,9 @@ type Conf struct {
 	DialAttempts    int
 	DialBackoffTime time.Duration
 
-	DialTimeout    time.Duration
-	RequestTimeout time.Duration
+	DialTimeout         time.Duration
+	RequestTimeout      time.Duration
+	MaxSeriesPerRequest int
 }
 
 type Exporter struct {
@@ -62,6 +63,9 @@ func New(confs *Conf, host, service string, tags map[string]string) (*Exporter, 
 
 	tags["service"] = service
 	tags["host"] = host
+	if confs.MaxSeriesPerRequest == 0 {
+		confs.MaxSeriesPerRequest = 1000
+	}
 
 	e := &Exporter{
 		counters:            lv.NewSpace(),
@@ -204,7 +208,18 @@ func (e *Exporter) Export() (err error) {
 	if len(bp) == 0 {
 		return nil
 	}
-	return e.client.PushMetricBlob(bp)
+
+	for i := 0; i < len(bp); i += e.conf.MaxSeriesPerRequest {
+		nrToSend := e.conf.MaxSeriesPerRequest
+		if i+nrToSend > len(bp) {
+			nrToSend = len(bp) - i
+		}
+		err := e.client.PushMetricBlob(bp[i : i+nrToSend])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type formatter struct {
